@@ -1,0 +1,23 @@
+[workspace]
+members = ["mcp-server", "jdwp-client"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Ed Sweeney <ed@onextent.com>"]
+license = "MIT"
+repository = "https://github.com/navicore/jdwp-mcp"
+description = "MCP server for Java debugging via JDWP protocol"
+keywords = ["mcp", "jdwp", "java", "debugger", "llm"]
+categories = ["development-tools::debugging", "command-line-utilities"]
+
+[workspace.dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.0", features = ["full"] }
+anyhow = "1.0"
+thiserror = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+bytes = "1.0"

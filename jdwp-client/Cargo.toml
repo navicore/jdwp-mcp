@@ -1,0 +1,45 @@
+[package]
+name = "jdwp-client"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "JDWP protocol client library for Java debugging"
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+bytes.workspace = true
+
+[dev-dependencies]
+tracing-subscriber.workspace = true
+reqwest = "0.11"
+
+[[example]]
+name = "test_connection"
+path = "../examples/test_connection.rs"
+
+[[example]]
+name = "test_vm_commands"
+path = "../examples/test_vm_commands.rs"
+
+[[example]]
+name = "test_find_class"
+path = "../examples/test_find_class.rs"
+
+[[example]]
+name = "test_breakpoint"
+path = "../examples/test_breakpoint.rs"
+
+[[example]]
+name = "test_stack_inspection"
+path = "../examples/test_stack_inspection.rs"
+
+[[example]]
+name = "test_manual_stack"
+path = "../examples/test_manual_stack.rs"
