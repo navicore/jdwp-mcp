@@ -19,6 +19,7 @@ pub struct DebugSession {
 #[derive(Debug, Clone)]
 pub struct BreakpointInfo {
     pub id: String,
+    pub request_id: i32,
     pub class_pattern: String,
     pub line: u32,
     pub method: Option<String>,
@@ -73,6 +74,11 @@ impl SessionManager {
         } else {
             None
         }
+    }
+
+    pub async fn get_current_session_id(&self) -> Option<SessionId> {
+        let current = self.current_session.lock().await;
+        current.clone()
     }
 
     pub async fn remove_session(&self, session_id: &str) {

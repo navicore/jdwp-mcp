@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "jdwp": {
+      "type": "stdio",
+      "command": "/Users/navicore/git/navicore/jdwp-mcp/target/release/jdwp-mcp",
+      "args": [],
+      "env": {}
+    }
+  }
+}
