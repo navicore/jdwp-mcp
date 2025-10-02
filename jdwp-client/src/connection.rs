@@ -1,18 +1,20 @@
 // JDWP connection management
 //
-// Handles TCP connection, handshake, and packet I/O
+// Handles TCP connection, handshake, and event loop startup
 
+use crate::eventloop::{spawn_event_loop, EventLoopHandle};
+use crate::events::EventSet;
 use crate::protocol::*;
-use bytes::BytesMut;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tracing::{debug, info, warn};
 
 #[derive(Debug)]
 pub struct JdwpConnection {
-    stream: TcpStream,
-    next_id: AtomicU32,
+    event_loop: EventLoopHandle,
+    next_id: Arc<AtomicU32>,
 }
 
 impl JdwpConnection {
@@ -25,9 +27,13 @@ impl JdwpConnection {
         // Perform JDWP handshake
         Self::handshake(&mut stream).await?;
 
+        // Split stream and spawn event loop
+        let (reader, writer) = stream.into_split();
+        let event_loop = spawn_event_loop(reader, writer);
+
         Ok(Self {
-            stream,
-            next_id: AtomicU32::new(1),
+            event_loop,
+            next_id: Arc::new(AtomicU32::new(1)),
         })
     }
 
@@ -54,42 +60,18 @@ impl JdwpConnection {
 
     /// Send a command and wait for reply
     pub async fn send_command(&mut self, packet: CommandPacket) -> JdwpResult<ReplyPacket> {
-        let encoded = packet.encode();
-        debug!("Sending command packet id={} len={}", packet.id, encoded.len());
-
-        self.stream.write_all(&encoded).await?;
-        self.stream.flush().await?;
-
-        // Read reply
-        self.read_reply().await
+        debug!("Sending command packet id={}", packet.id);
+        self.event_loop.send_command(packet).await
     }
 
-    /// Read a reply packet
-    async fn read_reply(&mut self) -> JdwpResult<ReplyPacket> {
-        // Read header first to get length
-        let mut header = BytesMut::with_capacity(HEADER_SIZE);
-        header.resize(HEADER_SIZE, 0);
+    /// Try to receive an event (non-blocking)
+    pub async fn try_recv_event(&self) -> Option<EventSet> {
+        self.event_loop.try_recv_event().await
+    }
 
-        self.stream.read_exact(&mut header).await?;
-
-        // Parse length (first 4 bytes)
-        let length = u32::from_be_bytes([header[0], header[1], header[2], header[3]]) as usize;
-
-        if length < HEADER_SIZE {
-            return Err(JdwpError::Protocol(format!("Invalid packet length: {}", length)));
-        }
-
-        // Read rest of packet if there's data beyond header
-        let data_len = length - HEADER_SIZE;
-        let mut full_packet = header.to_vec();
-
-        if data_len > 0 {
-            let mut data = vec![0u8; data_len];
-            self.stream.read_exact(&mut data).await?;
-            full_packet.extend_from_slice(&data);
-        }
-
-        ReplyPacket::decode(&full_packet)
+    /// Wait for the next event (blocking)
+    pub async fn recv_event(&self) -> Option<EventSet> {
+        self.event_loop.recv_event().await
     }
 
     /// Generate next packet ID

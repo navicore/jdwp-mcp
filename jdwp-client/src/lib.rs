@@ -11,6 +11,7 @@ pub mod connection;
 pub mod protocol;
 pub mod commands;
 pub mod events;
+pub mod eventloop;
 pub mod types;
 pub mod reader;
 pub mod vm;
@@ -21,6 +22,8 @@ pub mod thread;
 pub mod stackframe;
 
 pub use connection::JdwpConnection;
+pub use eventloop::{EventLoopHandle, spawn_event_loop};
+pub use events::EventSet;
 pub use protocol::{JdwpError, JdwpResult};
 pub use eventrequest::SuspendPolicy;
 
