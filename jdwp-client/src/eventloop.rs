@@ -89,10 +89,7 @@ impl EventLoopHandle {
 }
 
 /// Start the event loop task
-pub fn spawn_event_loop(
-    reader: OwnedReadHalf,
-    writer: OwnedWriteHalf,
-) -> EventLoopHandle {
+pub fn spawn_event_loop(reader: OwnedReadHalf, writer: OwnedWriteHalf) -> EventLoopHandle {
     let (command_tx, command_rx) = mpsc::channel(32);
     // Use larger buffer for events to avoid loss under load
     // Events are critical (breakpoints, exceptions) and shouldn't be dropped
@@ -209,9 +206,9 @@ async fn event_loop_task(
                                     // Send event, blocking if channel is full
                                     // This ensures critical events (breakpoints, exceptions) are never lost
                                     // The JVM is already suspended when events occur, so blocking here is acceptable
-                                    if let Err(_) = event_tx.send(event_set).await {
-                                        warn!("Event receiver dropped, future events will be discarded");
-                                        // Event loop continues but events are lost - acceptable for shutdown
+                                    if (event_tx.send(event_set).await).is_err() {
+                                        info!("Event receiver dropped, shutting down event loop");
+                                        break;
                                     }
                                 }
                                 Err(e) => {
