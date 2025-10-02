@@ -25,16 +25,24 @@ natural language.
 java -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005 -jar myapp.jar
 ```
 
-### 2. Build and run the MCP server
+### 2. Build the MCP server
 
 ```bash
 cargo build --release
-./target/release/jdwp-mcp
 ```
 
 ### 3. Configure Claude Code
 
-Add to your Claude Code MCP settings:
+The easiest way to enable the MCP server for your project:
+
+```bash
+# From your Java project directory
+claude mcp add --scope project jdwp /path/to/jdwp-mcp/target/release/jdwp-mcp
+```
+
+Adjust the path to match where you cloned this repository. The `--scope project` flag makes the debugger available only in your current Java project.
+
+**Alternative**: Manual configuration via `.mcp.json`:
 
 ```json
 {
