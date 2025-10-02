@@ -64,12 +64,34 @@ impl JdwpConnection {
         self.event_loop.send_command(packet).await
     }
 
-    /// Try to receive an event (non-blocking)
+    /// Try to receive an event without blocking.
+    ///
+    /// Returns `None` immediately if no events are available in the queue.
+    /// This is useful for polling events without blocking the current task.
+    ///
+    /// # Example
+    /// ```no_run
+    /// if let Some(event) = connection.try_recv_event().await {
+    ///     // Handle event
+    /// }
+    /// ```
     pub async fn try_recv_event(&self) -> Option<EventSet> {
         self.event_loop.try_recv_event().await
     }
 
-    /// Wait for the next event (blocking)
+    /// Wait for the next event (blocking).
+    ///
+    /// This method blocks until an event is available or the event channel is closed.
+    /// Use this when you want to wait for events like breakpoints or exceptions.
+    ///
+    /// Returns `None` if the event loop has shut down.
+    ///
+    /// # Example
+    /// ```no_run
+    /// while let Some(event) = connection.recv_event().await {
+    ///     // Process event
+    /// }
+    /// ```
     pub async fn recv_event(&self) -> Option<EventSet> {
         self.event_loop.recv_event().await
     }

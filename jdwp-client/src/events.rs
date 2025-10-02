@@ -65,6 +65,9 @@ pub enum EventKind {
         thread: ThreadId,
         location: Location,
     },
+    Unknown {
+        kind: u8,
+    },
 }
 
 // Event request modifiers
@@ -136,9 +139,8 @@ pub fn parse_event_packet(data: &[u8]) -> JdwpResult<EventSet> {
                 EventKind::ThreadDeath { thread }
             }
             _ => {
-                warn!("Unsupported event kind: {}, skipping details", kind);
-                // Skip unknown event data - this is a simplified approach
-                EventKind::VMDeath // Placeholder for unknown events
+                warn!("Unsupported event kind: {}", kind);
+                EventKind::Unknown { kind }
             }
         };
 
