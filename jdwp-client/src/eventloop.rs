@@ -203,12 +203,20 @@ async fn event_loop_task(
                                     info!("Parsed event set: {} events, suspend_policy={}",
                                           event_set.events.len(), event_set.suspend_policy);
 
-                                    // Send event, blocking if channel is full
-                                    // This ensures critical events (breakpoints, exceptions) are never lost
-                                    // The JVM is already suspended when events occur, so blocking here is acceptable
-                                    if (event_tx.send(event_set).await).is_err() {
-                                        info!("Event receiver dropped, shutting down event loop");
-                                        break;
+                                    // Send event without blocking to avoid deadlock
+                                    // If consumer is sending commands while we're reading, blocking here would deadlock
+                                    match event_tx.try_send(event_set) {
+                                        Ok(_) => {},
+                                        Err(mpsc::error::TrySendError::Full(dropped_event)) => {
+                                            // Event channel is full - this is critical
+                                            error!("Event channel full ({} buffered), dropping event with {} events. Consumer not keeping up!",
+                                                  event_tx.capacity(), dropped_event.events.len());
+                                            // TODO: Consider adding backpressure or alerting mechanism
+                                        }
+                                        Err(mpsc::error::TrySendError::Closed(_)) => {
+                                            info!("Event receiver dropped, shutting down event loop");
+                                            break;
+                                        }
                                     }
                                 }
                                 Err(e) => {
