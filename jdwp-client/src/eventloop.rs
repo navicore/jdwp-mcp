@@ -16,13 +16,42 @@ use tracing::{debug, error, info, warn};
 /// This prevents memory exhaustion from malicious or buggy JVMs
 const MAX_PACKET_SIZE: usize = 10 * 1024 * 1024;
 
+/// Maximum time to wait for a command reply before considering it lost
+const REPLY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// Request to send a command and get reply
 pub struct CommandRequest {
     pub packet: CommandPacket,
     pub reply_tx: oneshot::Sender<JdwpResult<ReplyPacket>>,
 }
 
-/// Handle to the event loop for sending commands and receiving events
+/// Handle to the event loop for sending commands and receiving events.
+///
+/// This handle can be cloned to send commands from multiple tasks, but only ONE clone
+/// should call `recv_event()` or `try_recv_event()` at a time. The event receiver is
+/// wrapped in an Arc<Mutex<Receiver>> which allows sharing, but concurrent event
+/// consumption from multiple tasks will lead to unpredictable behavior (events distributed
+/// round-robin across consumers).
+///
+/// # Thread Safety
+/// - Commands can be sent concurrently from multiple clones
+/// - Events should be consumed from a single task/clone
+///
+/// # Example
+/// ```no_run
+/// // Good: Single event consumer
+/// let handle1 = event_loop.clone();
+/// let handle2 = event_loop.clone();
+///
+/// // Both can send commands
+/// handle1.send_command(cmd1);
+/// handle2.send_command(cmd2);
+///
+/// // Only one should consume events
+/// while let Some(event) = handle1.recv_event().await {
+///     // Process event
+/// }
+/// ```
 #[derive(Clone, Debug)]
 pub struct EventLoopHandle {
     command_tx: mpsc::Sender<CommandRequest>,
@@ -77,6 +106,12 @@ pub fn spawn_event_loop(
     }
 }
 
+/// Pending reply with timestamp for timeout tracking
+struct PendingReply {
+    sender: oneshot::Sender<JdwpResult<ReplyPacket>>,
+    sent_at: tokio::time::Instant,
+}
+
 /// Main event loop task
 async fn event_loop_task(
     mut reader: OwnedReadHalf,
@@ -86,8 +121,8 @@ async fn event_loop_task(
 ) {
     info!("Event loop started");
 
-    let mut pending_replies: HashMap<u32, oneshot::Sender<JdwpResult<ReplyPacket>>> =
-        HashMap::new();
+    let mut pending_replies: HashMap<u32, PendingReply> = HashMap::new();
+    let mut cleanup_interval = tokio::time::interval(tokio::time::Duration::from_secs(10));
 
     loop {
         tokio::select! {
@@ -109,7 +144,32 @@ async fn event_loop_task(
                     continue;
                 }
 
-                pending_replies.insert(packet_id, cmd.reply_tx);
+                pending_replies.insert(packet_id, PendingReply {
+                    sender: cmd.reply_tx,
+                    sent_at: tokio::time::Instant::now(),
+                });
+            }
+
+            // Periodic cleanup of timed-out pending replies
+            _ = cleanup_interval.tick() => {
+                let now = tokio::time::Instant::now();
+                let before_count = pending_replies.len();
+
+                pending_replies.retain(|packet_id, pending| {
+                    let elapsed = now.duration_since(pending.sent_at);
+                    if elapsed > REPLY_TIMEOUT {
+                        warn!("Command {} timed out after {:?}, removing from pending replies", packet_id, elapsed);
+                        // Note: sender is dropped here, which will notify the waiting command
+                        false
+                    } else {
+                        true
+                    }
+                });
+
+                let removed = before_count - pending_replies.len();
+                if removed > 0 {
+                    warn!("Cleaned up {} timed-out pending replies", removed);
+                }
             }
 
             // Handle incoming packets
@@ -120,18 +180,18 @@ async fn event_loop_task(
                             // It's a reply - route to waiting command
                             debug!("Received reply id={}", packet_id);
 
-                            if let Some(tx) = pending_replies.remove(&packet_id) {
+                            if let Some(pending) = pending_replies.remove(&packet_id) {
                                 match ReplyPacket::decode(&data) {
                                     Ok(reply) => {
-                                        tx.send(Ok(reply)).ok();
+                                        pending.sender.send(Ok(reply)).ok();
                                     }
                                     Err(e) => {
                                         warn!("Failed to decode reply: {}", e);
-                                        tx.send(Err(e)).ok();
+                                        pending.sender.send(Err(e)).ok();
                                     }
                                 }
                             } else {
-                                warn!("Received reply for unknown command id={}", packet_id);
+                                warn!("Received reply for unknown command id={} (may have timed out)", packet_id);
                             }
                         } else {
                             // It's an event - parse and broadcast
@@ -146,17 +206,12 @@ async fn event_loop_task(
                                     info!("Parsed event set: {} events, suspend_policy={}",
                                           event_set.events.len(), event_set.suspend_policy);
 
-                                    // Try to send event without blocking
-                                    match event_tx.try_send(event_set) {
-                                        Ok(_) => {}
-                                        Err(mpsc::error::TrySendError::Full(event)) => {
-                                            error!("Event channel full! Dropping event with {} events. Consider increasing buffer size or consuming events faster.",
-                                                  event.events.len());
-                                            // This is a critical error - breakpoint events shouldn't be dropped
-                                        }
-                                        Err(mpsc::error::TrySendError::Closed(_)) => {
-                                            warn!("Event receiver dropped, future events will be discarded");
-                                        }
+                                    // Send event, blocking if channel is full
+                                    // This ensures critical events (breakpoints, exceptions) are never lost
+                                    // The JVM is already suspended when events occur, so blocking here is acceptable
+                                    if let Err(_) = event_tx.send(event_set).await {
+                                        warn!("Event receiver dropped, future events will be discarded");
+                                        // Event loop continues but events are lost - acceptable for shutdown
                                     }
                                 }
                                 Err(e) => {
