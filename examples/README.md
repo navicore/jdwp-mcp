@@ -12,7 +12,7 @@ All examples assume:
 ## Examples
 
 ### [observability-debugging.md](observability-debugging.md)
-**Real-World Spring Boot Debugging**
+**Real-World Spring Boot Debugging** *(Advanced)*
 
 Investigates an ObservationRegistry post-processing issue similar to [spring-security#15658](https://github.com/spring-projects/spring-security/issues/15658).
 

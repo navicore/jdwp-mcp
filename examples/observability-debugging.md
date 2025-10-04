@@ -22,6 +22,17 @@ This example demonstrates using the JDWP MCP debugger to investigate a real-worl
 
 ## Debugging Session
 
+### Prerequisites Check
+
+First, verify if metrics are working (this tells us if ObservationRegistry is healthy):
+
+```bash
+# Check if http.server.requests metric exists
+curl http://localhost:8081/actuator/metrics/http.server.requests
+```
+
+If you get a 404 or "No such metric" error, you have the bug. If you get data, post-processing worked.
+
 ### Step 1: Attach to the JVM
 
 **Prompt:**
@@ -239,12 +250,75 @@ curl http://localhost:8080/
 curl http://localhost:8080/actuator/metrics/http.server.requests
 ```
 
+## Validated Approach: Runtime Verification
+
+Since connecting to an already-running application is the most common scenario (especially with production systems via kubectl port-forward), here's how to verify post-processing after the fact:
+
+### Step 1: Verify Metrics Endpoint
+
+```bash
+# Generate some traffic
+curl http://localhost:8080/
+
+# Check if metrics are being collected
+curl http://localhost:8081/actuator/metrics/http.server.requests
+```
+
+**Working (post-processing succeeded):**
+```json
+{
+  "name": "http.server.requests",
+  "measurements": [{"statistic": "COUNT", "value": 1.0}]
+}
+```
+
+**Bug present (post-processing failed):**
+```json
+{
+  "error": "Not Found",
+  "message": "No such metric: http.server.requests"
+}
+```
+
+### Step 2: Use Debugger to Inspect Live State
+
+**Prompt:**
+```
+Attach to localhost:5005
+Set a breakpoint at HelloController line 57
+```
+
+Trigger a request to hit the breakpoint, then:
+
+**Prompt:**
+```
+Show me the current stack and the meterRegistry field
+List all threads
+```
+
+This validates:
+- The application responds to breakpoints
+- You can inspect the MeterRegistry that was injected
+- Metrics are being recorded (proving post-processing worked)
+
+### Step 3: Verify Bean Configuration
+
+If metrics aren't working, check the application logs for warnings:
+
+```
+Bean 'observationRegistry' is not eligible for getting processed by all BeanPostProcessors
+```
+
+This warning indicates the bug is present.
+
 ## Conclusion
 
 This debugging session demonstrates how to:
+- Verify ObservationRegistry post-processing via metrics
 - Use natural language to set strategic breakpoints
-- Inspect Spring internal state during initialization
-- Verify bean post-processing
-- Validate observability configuration
+- Inspect application state at runtime
+- Validate observability configuration without code changes
 
-The JDWP MCP debugger enables investigating complex framework issues without writing test code or adding logging statements.
+The JDWP MCP debugger enables investigating complex framework issues in running applications without writing test code or adding logging statements.
+
+**Key Insight**: For production debugging, verifying the symptoms (metrics work/don't work) is often more practical than trying to replay initialization. The debugger lets you inspect the current state to understand what went wrong.

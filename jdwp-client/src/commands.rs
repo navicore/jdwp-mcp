@@ -95,6 +95,23 @@ pub mod event_commands {
     pub const CLEAR_ALL_BREAKPOINTS: u8 = 3;
 }
 
+// StringReference commands (set 10)
+pub mod string_reference_commands {
+    pub const VALUE: u8 = 1;
+}
+
+// ObjectReference commands (set 9)
+pub mod object_reference_commands {
+    pub const REFERENCE_TYPE: u8 = 1;
+    pub const GET_VALUES: u8 = 2;
+    pub const SET_VALUES: u8 = 3;
+    pub const MONITOR_INFO: u8 = 5;
+    pub const INVOKE_METHOD: u8 = 6;
+    pub const DISABLE_COLLECTION: u8 = 7;
+    pub const ENABLE_COLLECTION: u8 = 8;
+    pub const IS_COLLECTED: u8 = 9;
+}
+
 // StackFrame commands (set 16)
 pub mod stack_frame_commands {
     pub const GET_VALUES: u8 = 1;

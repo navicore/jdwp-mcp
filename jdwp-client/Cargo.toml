@@ -43,3 +43,7 @@ path = "../examples/test_stack_inspection.rs"
 [[example]]
 name = "test_manual_stack"
 path = "../examples/test_manual_stack.rs"
+
+[[example]]
+name = "test_string_values"
+path = "../examples/test_string_values.rs"
