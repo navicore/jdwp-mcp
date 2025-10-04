@@ -350,7 +350,7 @@ impl RequestHandler {
 
         let max_frames = args.get("max_frames")
             .and_then(|v| v.as_i64())
-            .unwrap_or(20) as i32;
+            .unwrap_or(20) as usize;
 
         let include_variables = args.get("include_variables")
             .and_then(|v| v.as_bool())
@@ -366,9 +366,12 @@ impl RequestHandler {
             *threads.first().ok_or_else(|| "No threads found".to_string())?
         };
 
-        // Get frames
-        let frames = session.connection.get_frames(target_thread, 0, max_frames).await
+        // Get frames (-1 means all frames to avoid INVALID_LENGTH errors)
+        let mut frames = session.connection.get_frames(target_thread, 0, -1).await
             .map_err(|e| format!("Failed to get frames: {}", e))?;
+
+        // Truncate to max_frames
+        frames.truncate(max_frames);
 
         if frames.is_empty() {
             return Ok(format!("Thread {:x} has no stack frames", target_thread));
@@ -407,7 +410,26 @@ impl RequestHandler {
 
                                     if let Ok(values) = session.connection.get_frame_values(target_thread, frame.frame_id, slots).await {
                                         for (var, value) in active_vars.iter().zip(values.iter()) {
-                                            output.push_str(&format!("    {} = {}\n", var.name, value.format()));
+                                            // Check if this is a string object (tag 115 = 's')
+                                            let formatted_value = if value.tag == 115 {
+                                                // This is a String object
+                                                if let jdwp_client::types::ValueData::Object(object_id) = &value.data {
+                                                    if *object_id != 0 {
+                                                        // Try to get the string value
+                                                        match session.connection.get_string_value(*object_id).await {
+                                                            Ok(string_val) => format!("(String) \"{}\"", string_val),
+                                                            Err(_) => value.format(), // Fall back to object ID
+                                                        }
+                                                    } else {
+                                                        "(String) null".to_string()
+                                                    }
+                                                } else {
+                                                    value.format()
+                                                }
+                                            } else {
+                                                value.format()
+                                            };
+                                            output.push_str(&format!("    {} = {}\n", var.name, formatted_value));
                                         }
                                     }
                                 }
