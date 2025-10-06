@@ -152,28 +152,44 @@ impl RequestHandler {
                 // Create session
                 let session_id = self.session_manager.create_session(connection).await;
 
-                // Spawn task to listen for events and store them in session
+                // Get session to store task handle
+                let session_guard = self.session_manager.get_current_session().await
+                    .ok_or_else(|| "Failed to get session after creation".to_string())?;
+
+                // Spawn task to listen for events using blocking recv (not busy polling)
                 let session_manager = self.session_manager.clone();
-                tokio::spawn(async move {
+                let task_handle = tokio::spawn(async move {
                     loop {
-                        if let Some(session_guard) = session_manager.get_current_session().await {
+                        // Get session and extract connection reference
+                        let event_opt = {
+                            let session_guard = match session_manager.get_current_session().await {
+                                Some(guard) => guard,
+                                None => break, // Session gone
+                            };
                             let session = session_guard.lock().await;
-                            // Try to receive an event (non-blocking)
-                            if let Some(event_set) = session.connection.try_recv_event().await {
-                                drop(session); // Release lock before re-acquiring
-                                if let Some(session_guard) = session_manager.get_current_session().await {
-                                    let mut session = session_guard.lock().await;
-                                    session.last_event = Some(event_set);
-                                }
+                            // Blocking recv (no busy polling!)
+                            session.connection.recv_event().await
+                        };
+
+                        // Store event without holding lock during I/O
+                        if let Some(event_set) = event_opt {
+                            if let Some(session_guard) = session_manager.get_current_session().await {
+                                let mut session = session_guard.lock().await;
+                                session.last_event = Some(event_set);
                             } else {
-                                drop(session);
+                                break;
                             }
                         } else {
-                            break; // Session gone, exit loop
+                            break; // Connection closed
                         }
-                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
                     }
                 });
+
+                // Store task handle in session for cleanup
+                {
+                    let mut session = session_guard.lock().await;
+                    session.event_listener_task = Some(task_handle);
+                }
 
                 Ok(format!("Connected to JVM at {}:{} (session: {})", host, port, session_id))
             }

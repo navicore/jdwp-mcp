@@ -6,6 +6,7 @@ use jdwp_client::{JdwpConnection, EventSet};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
 
 pub type SessionId = String;
 
@@ -15,6 +16,7 @@ pub struct DebugSession {
     pub breakpoints: HashMap<String, BreakpointInfo>,
     pub threads: HashMap<String, ThreadInfo>,
     pub last_event: Option<EventSet>,
+    pub event_listener_task: Option<JoinHandle<()>>,
 }
 
 #[derive(Debug, Clone)]
@@ -57,6 +59,7 @@ impl SessionManager {
             breakpoints: HashMap::new(),
             threads: HashMap::new(),
             last_event: None,
+            event_listener_task: None,
         };
 
         let mut sessions = self.sessions.lock().await;
@@ -86,6 +89,15 @@ impl SessionManager {
 
     pub async fn remove_session(&self, session_id: &str) {
         let mut sessions = self.sessions.lock().await;
+
+        // Abort the event listener task if it exists
+        if let Some(session_arc) = sessions.get(session_id) {
+            let mut session = session_arc.lock().await;
+            if let Some(task) = session.event_listener_task.take() {
+                task.abort();
+            }
+        }
+
         sessions.remove(session_id);
 
         // Clear current if it was this session
