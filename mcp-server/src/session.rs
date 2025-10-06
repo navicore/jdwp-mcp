@@ -2,7 +2,7 @@
 //
 // Manages JDWP connection state, breakpoints, and thread tracking
 
-use jdwp_client::JdwpConnection;
+use jdwp_client::{JdwpConnection, EventSet};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -14,6 +14,7 @@ pub struct DebugSession {
     pub connection: JdwpConnection,
     pub breakpoints: HashMap<String, BreakpointInfo>,
     pub threads: HashMap<String, ThreadInfo>,
+    pub last_event: Option<EventSet>,
 }
 
 #[derive(Debug, Clone)]
@@ -35,6 +36,7 @@ pub struct ThreadInfo {
     pub suspended: bool,
 }
 
+#[derive(Clone)]
 pub struct SessionManager {
     sessions: Arc<Mutex<HashMap<SessionId, Arc<Mutex<DebugSession>>>>>,
     current_session: Arc<Mutex<Option<SessionId>>>,
@@ -54,6 +56,7 @@ impl SessionManager {
             connection,
             breakpoints: HashMap::new(),
             threads: HashMap::new(),
+            last_event: None,
         };
 
         let mut sessions = self.sessions.lock().await;
