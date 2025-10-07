@@ -11,7 +11,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tracing::{debug, info, warn};
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct JdwpConnection {
     event_loop: EventLoopHandle,
     next_id: Arc<AtomicU32>,

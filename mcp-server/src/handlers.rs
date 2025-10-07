@@ -152,37 +152,36 @@ impl RequestHandler {
                 // Create session
                 let session_id = self.session_manager.create_session(connection).await;
 
-                // Get session to store task handle
+                // Get session to clone connection and store task handle
                 let session_guard = self.session_manager.get_current_session().await
                     .ok_or_else(|| "Failed to get session after creation".to_string())?;
+
+                // Clone connection for the event listener (cheap - uses Arc internally)
+                let connection_clone = {
+                    let session = session_guard.lock().await;
+                    session.connection.clone()
+                };
 
                 // Spawn task to listen for events using blocking recv (not busy polling)
                 let session_manager = self.session_manager.clone();
                 let task_handle = tokio::spawn(async move {
                     loop {
-                        // Get session and extract connection reference
-                        let event_opt = {
-                            let session_guard = match session_manager.get_current_session().await {
-                                Some(guard) => guard,
-                                None => break, // Session gone
-                            };
-                            let session = session_guard.lock().await;
-                            // Blocking recv (no busy polling!)
-                            session.connection.recv_event().await
-                        };
+                        // Receive event without holding any locks!
+                        let event_opt = connection_clone.recv_event().await;
 
-                        // Store event without holding lock during I/O
+                        // Store event (brief lock acquisition)
                         if let Some(event_set) = event_opt {
                             if let Some(session_guard) = session_manager.get_current_session().await {
                                 let mut session = session_guard.lock().await;
                                 session.last_event = Some(event_set);
                             } else {
-                                break;
+                                break; // Session gone
                             }
                         } else {
                             break; // Connection closed
                         }
                     }
+                    info!("Event listener task stopped");
                 });
 
                 // Store task handle in session for cleanup
