@@ -152,41 +152,38 @@ impl RequestHandler {
                 // Create session
                 let session_id = self.session_manager.create_session(connection).await;
 
-                // Get session to clone connection and store task handle
+                // Get session guard once to prevent race between spawn and store
                 let session_guard = self.session_manager.get_current_session().await
                     .ok_or_else(|| "Failed to get session after creation".to_string())?;
 
-                // Clone connection for the event listener (cheap - uses Arc internally)
-                let connection_clone = {
-                    let session = session_guard.lock().await;
-                    session.connection.clone()
-                };
-
-                // Spawn task to listen for events using blocking recv (not busy polling)
-                let session_manager = self.session_manager.clone();
-                let task_handle = tokio::spawn(async move {
-                    loop {
-                        // Receive event without holding any locks!
-                        let event_opt = connection_clone.recv_event().await;
-
-                        // Store event (brief lock acquisition)
-                        if let Some(event_set) = event_opt {
-                            if let Some(session_guard) = session_manager.get_current_session().await {
-                                let mut session = session_guard.lock().await;
-                                session.last_event = Some(event_set);
-                            } else {
-                                break; // Session gone
-                            }
-                        } else {
-                            break; // Connection closed
-                        }
-                    }
-                    info!("Event listener task stopped");
-                });
-
-                // Store task handle in session for cleanup
+                // Clone connection, spawn task, and store handle in single critical section
                 {
                     let mut session = session_guard.lock().await;
+                    let connection_clone = session.connection.clone();
+
+                    // Spawn event listener task
+                    let session_manager = self.session_manager.clone();
+                    let task_handle = tokio::spawn(async move {
+                        loop {
+                            // Receive event without holding any locks!
+                            let event_opt = connection_clone.recv_event().await;
+
+                            // Store event (brief lock acquisition)
+                            if let Some(event_set) = event_opt {
+                                if let Some(session_guard) = session_manager.get_current_session().await {
+                                    let mut session = session_guard.lock().await;
+                                    session.last_event = Some(event_set);
+                                } else {
+                                    break; // Session gone
+                                }
+                            } else {
+                                break; // Connection closed
+                            }
+                        }
+                        info!("Event listener task stopped");
+                    });
+
+                    // Store task handle before releasing lock - prevents race with disconnect
                     session.event_listener_task = Some(task_handle);
                 }
 
