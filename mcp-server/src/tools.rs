@@ -217,5 +217,13 @@ pub fn get_tools() -> Vec<Tool> {
                 "properties": {}
             }),
         },
+        Tool {
+            name: "debug.get_last_event".to_string(),
+            description: "Get the last breakpoint/event received with thread ID".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {}
+            }),
+        },
     ]
 }

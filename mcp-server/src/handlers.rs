@@ -120,6 +120,7 @@ impl RequestHandler {
             "debug.list_threads" => self.handle_list_threads(call_params.arguments).await,
             "debug.pause" => self.handle_pause(call_params.arguments).await,
             "debug.disconnect" => self.handle_disconnect(call_params.arguments).await,
+            "debug.get_last_event" => self.handle_get_last_event(call_params.arguments).await,
             _ => Err(format!("Unknown tool: {}", call_params.name)),
         };
 
@@ -148,7 +149,44 @@ impl RequestHandler {
 
         match jdwp_client::JdwpConnection::connect(host, port).await {
             Ok(connection) => {
+                // Create session
                 let session_id = self.session_manager.create_session(connection).await;
+
+                // Get session guard once to prevent race between spawn and store
+                let session_guard = self.session_manager.get_current_session().await
+                    .ok_or_else(|| "Failed to get session after creation".to_string())?;
+
+                // Clone connection, spawn task, and store handle in single critical section
+                {
+                    let mut session = session_guard.lock().await;
+                    let connection_clone = session.connection.clone();
+
+                    // Spawn event listener task
+                    let session_manager = self.session_manager.clone();
+                    let task_handle = tokio::spawn(async move {
+                        loop {
+                            // Receive event without holding any locks!
+                            let event_opt = connection_clone.recv_event().await;
+
+                            // Store event (brief lock acquisition)
+                            if let Some(event_set) = event_opt {
+                                if let Some(session_guard) = session_manager.get_current_session().await {
+                                    let mut session = session_guard.lock().await;
+                                    session.last_event = Some(event_set);
+                                } else {
+                                    break; // Session gone
+                                }
+                            } else {
+                                break; // Connection closed
+                            }
+                        }
+                        info!("Event listener task stopped");
+                    });
+
+                    // Store task handle before releasing lock - prevents race with disconnect
+                    session.event_listener_task = Some(task_handle);
+                }
+
                 Ok(format!("Connected to JVM at {}:{} (session: {})", host, port, session_id))
             }
             Err(e) => Err(format!("Failed to connect: {}", e)),
@@ -503,6 +541,66 @@ impl RequestHandler {
             Ok(format!("✅ Disconnected from debug session: {}", session_id))
         } else {
             Err("No active debug session to disconnect".to_string())
+        }
+    }
+
+    async fn handle_get_last_event(&self, _args: serde_json::Value) -> Result<String, String> {
+        let session_guard = self.session_manager.get_current_session().await
+            .ok_or_else(|| "No active debug session".to_string())?;
+
+        let session = session_guard.lock().await;
+
+        if let Some(event_set) = &session.last_event {
+            let mut output = format!("🎯 Last event (suspend_policy={})\n\n", event_set.suspend_policy);
+
+            for (idx, event) in event_set.events.iter().enumerate() {
+                output.push_str(&format!("Event {}:\n", idx + 1));
+                output.push_str(&format!("  Request ID: {}\n", event.request_id));
+
+                match &event.details {
+                    jdwp_client::events::EventKind::Breakpoint { thread, location } => {
+                        output.push_str("  Type: Breakpoint\n");
+                        output.push_str(&format!("  ⚡ Thread ID: 0x{:x}\n", thread));
+                        output.push_str(&format!("  Location: class=0x{:x}, method=0x{:x}, index={}\n",
+                            location.class_id, location.method_id, location.index));
+                    }
+                    jdwp_client::events::EventKind::Step { thread, location } => {
+                        output.push_str("  Type: Step\n");
+                        output.push_str(&format!("  Thread ID: 0x{:x}\n", thread));
+                        output.push_str(&format!("  Location: class=0x{:x}, method=0x{:x}, index={}\n",
+                            location.class_id, location.method_id, location.index));
+                    }
+                    jdwp_client::events::EventKind::VMStart { thread } => {
+                        output.push_str("  Type: VM Start\n");
+                        output.push_str(&format!("  Thread ID: 0x{:x}\n", thread));
+                    }
+                    jdwp_client::events::EventKind::VMDeath => {
+                        output.push_str("  Type: VM Death\n");
+                    }
+                    jdwp_client::events::EventKind::ThreadStart { thread } => {
+                        output.push_str("  Type: Thread Start\n");
+                        output.push_str(&format!("  Thread ID: 0x{:x}\n", thread));
+                    }
+                    jdwp_client::events::EventKind::ThreadDeath { thread } => {
+                        output.push_str("  Type: Thread Death\n");
+                        output.push_str(&format!("  Thread ID: 0x{:x}\n", thread));
+                    }
+                    jdwp_client::events::EventKind::ClassPrepare { thread, ref_type, signature, .. } => {
+                        output.push_str("  Type: Class Prepare\n");
+                        output.push_str(&format!("  Thread ID: 0x{:x}\n", thread));
+                        output.push_str(&format!("  Class: {} (0x{:x})\n", signature, ref_type));
+                    }
+                    _ => {
+                        output.push_str("  Type: Other\n");
+                    }
+                }
+
+                output.push_str("\n");
+            }
+
+            Ok(output)
+        } else {
+            Ok("No events received yet. Set a breakpoint and trigger it.".to_string())
         }
     }
 }

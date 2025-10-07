@@ -22,13 +22,16 @@ Users need to:
 - Get stack frames
 - See variable names and types in frames
 - Continue/pause execution
+- ✅ **String values**: Now show actual string contents (Week 1 complete!)
 
 ### What Doesn't Work ❌
-- **Variable value inspection**: Variables show as `(object) @0x7f8b9c001000` with no useful information
+- **⚠️ CRITICAL: Breakpoint event visibility**: When a breakpoint hits, users don't know which thread to inspect!
+  - Events contain thread ID but MCP server doesn't expose them
+  - Users must manually guess which of 36 threads hit the breakpoint
+  - Makes the tool unusable for real debugging
 - **Object field access**: Can't see fields of an object
 - **Collection inspection**: Can't see what's in a List/Map/Set
-- **String values**: Can't see actual string contents
-- **Primitive values**: Show correctly but primitives in objects aren't accessible
+- **Primitive values in objects**: Primitives in objects aren't accessible
 - **Expression evaluation**: Can't call methods like `toString()` or `getMeters()`
 
 ## Implementation Phases
@@ -205,11 +208,15 @@ Found 2 matches:
 ## Implementation Order
 
 ### Week 1: Core Infrastructure
-1. ✅ Fix INVALID_LENGTH bug (DONE)
-2. Implement `StringReference.Value` command
-3. Implement `ReferenceType.Fields` command
-4. Implement `ObjectReference.GetValues` command
-5. Test basic field access
+1. ✅ Fix INVALID_LENGTH bug
+2. ✅ Implement `StringReference.Value` command
+3. ✅ Implement `ReferenceType.Fields` command
+4. ✅ Implement `ObjectReference.GetValues` command
+5. ✅ Auto-expand strings in `handle_get_stack()`
+6. **🚨 BLOCKER: Expose breakpoint events to users**
+   - Add MCP handler to show last breakpoint event with thread ID
+   - Store last event in session
+   - Return thread ID when breakpoint hits
 
 ### Week 2: Object Inspection
 6. Implement recursive object expansion (with max depth)
