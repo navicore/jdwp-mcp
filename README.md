@@ -1,3 +1,8 @@
+<!-- ghmig:moved -->
+> **This repository has moved to [https://git.navicore.tech/navicore/jdwp-mcp](https://git.navicore.tech/navicore/jdwp-mcp).**
+>
+> The GitHub copy is archived and no longer maintained.
+
 # jdwp-mcp
 
 **Java debugging for LLMs via JDWP and Model Context Protocol**
